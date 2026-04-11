@@ -6,10 +6,12 @@ import asyncio
 import json
 import logging
 import os
+import re
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone, timedelta
 from typing import Any, Optional
+from urllib.parse import urlparse
 
 import uvicorn
 from dotenv import load_dotenv
@@ -119,6 +121,88 @@ def _error_response(
         status_code=status_code,
         media_type="application/acp+json",
     )
+
+
+# ---------------------------------------------------------------------------
+# contentRef validation (ACP v0.3)
+# ---------------------------------------------------------------------------
+
+# Regex for private/reserved hostnames
+_PRIVATE_HOST_RE = re.compile(
+    r"^("
+    r"localhost"
+    r"|127\.0\.0\.1"
+    r"|0\.0\.0\.0"
+    r"|::1"
+    r"|10\.\d{1,3}\.\d{1,3}\.\d{1,3}"
+    r"|192\.168\.\d{1,3}\.\d{1,3}"
+    r"|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}"
+    r")$"
+)
+
+_HEX64_RE = re.compile(r"^[0-9a-fA-F]{64}$")
+
+
+def validate_content_refs(body: Any) -> Optional[str]:
+    """Recursively walk *body* and validate every ``contentRef`` object.
+
+    Returns an error message string if validation fails, or ``None`` if
+    everything is valid.  Only structural checks are performed -- the URL
+    is NOT fetched and the hash is NOT verified.
+    """
+
+    def _walk(node: Any) -> Optional[str]:
+        if isinstance(node, dict):
+            if "contentRef" in node:
+                ref = node["contentRef"]
+                if not isinstance(ref, dict):
+                    return "contentRef must be an object"
+
+                # --- url ---
+                url = ref.get("url")
+                if url is None:
+                    return "contentRef.url is required"
+                if not isinstance(url, str) or not url.startswith("https://"):
+                    return "contentRef.url must start with https://"
+
+                # Check for private/reserved hostnames
+                try:
+                    parsed = urlparse(url)
+                    hostname = parsed.hostname or ""
+                    if _PRIVATE_HOST_RE.match(hostname):
+                        return f"contentRef.url must not reference private host: {hostname}"
+                except Exception:
+                    return "contentRef.url is not a valid URL"
+
+                # --- sha256 ---
+                sha = ref.get("sha256")
+                if sha is None:
+                    return "contentRef.sha256 is required"
+                if not isinstance(sha, str) or not _HEX64_RE.match(sha):
+                    return "contentRef.sha256 must be a 64-character hex string"
+
+                # --- size ---
+                size = ref.get("size")
+                if size is None:
+                    return "contentRef.size is required"
+                if not isinstance(size, int) or isinstance(size, bool) or size <= 0:
+                    return "contentRef.size must be a positive integer"
+
+            # Recurse into all values
+            for v in node.values():
+                err = _walk(v)
+                if err:
+                    return err
+
+        elif isinstance(node, list):
+            for item in node:
+                err = _walk(item)
+                if err:
+                    return err
+
+        return None
+
+    return _walk(body)
 
 
 # ---------------------------------------------------------------------------
@@ -433,6 +517,17 @@ async def inbox(name: str, request: Request) -> Response:
             retryable=False,
             correlation_id=correlation_id,
             status_code=401,
+        )
+
+    # --- Validate contentRef objects in body (ACP v0.3) ---
+    content_ref_err = validate_content_refs(msg.get("body", {}))
+    if content_ref_err:
+        return _error_response(
+            to_did=sender_did,
+            code="SCHEMA_INVALID",
+            message=content_ref_err,
+            retryable=False,
+            correlation_id=correlation_id,
         )
 
     # --- Pin key on first contact ---

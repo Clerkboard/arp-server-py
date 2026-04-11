@@ -1,6 +1,6 @@
 # ACP Server -- Python
 
-Reference implementation of the [Agent Communication Protocol](https://github.com/clerkboard/acp).
+Reference implementation of the [Agent Communication Protocol v0.3](https://github.com/clerkboard/acp).
 
 ## Quick Start
 
