@@ -265,7 +265,7 @@ app = FastAPI(title="ACP Server", lifespan=lifespan)
 @app.get("/agents.txt")
 async def agents_txt() -> Response:
     """Serve agents.txt discovery hint file (Section 5.3)."""
-    content = f"# ACP agents for this domain\nacp-index: {_base_url()}/.well-known/acp/index.json\n"
+    content = f"# ACP agents for this domain\nacp-version: 1.0\nacp-index: {_base_url()}/.well-known/acp/index.json\nacp-docs: https://github.com/clerkboard/acp/blob/main/spec/acp-rfc.md#appendix-e-implementers-quick-reference\n"
     return Response(content=content, media_type="text/plain")
 
 

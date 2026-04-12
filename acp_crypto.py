@@ -22,6 +22,9 @@ from cryptography.hazmat.primitives.serialization import (
 
 logger = logging.getLogger(__name__)
 
+# Multicodec prefix for Ed25519 public keys (2 bytes: 0xed 0x01).
+ED25519_MULTICODEC_PREFIX = bytes([0xED, 0x01])
+
 
 def canonicalize(obj: Any) -> str:
     """Produce a JCS (RFC 8785) canonical JSON string.
@@ -58,9 +61,9 @@ def private_key_to_hex(private_key: Ed25519PrivateKey) -> str:
 
 
 def public_key_to_multibase(public_key: Ed25519PublicKey) -> str:
-    """Serialize an Ed25519 public key to multibase base58btc."""
+    """Serialize an Ed25519 public key to multibase base58btc with multicodec prefix."""
     raw = public_key.public_bytes(Encoding.Raw, PublicFormat.Raw)
-    return multibase_encode(raw)
+    return multibase_encode(ED25519_MULTICODEC_PREFIX + raw)
 
 
 def private_key_from_hex(hex_str: str) -> Ed25519PrivateKey:
@@ -69,8 +72,20 @@ def private_key_from_hex(hex_str: str) -> Ed25519PrivateKey:
 
 
 def public_key_from_multibase(multibase: str) -> Ed25519PublicKey:
-    """Load an Ed25519 public key from a multibase base58btc string."""
-    raw = multibase_decode(multibase)
+    """Load an Ed25519 public key from a multibase base58btc string.
+
+    Handles both multicodec-prefixed (34 bytes) and raw (32 bytes) formats.
+    """
+    decoded = multibase_decode(multibase)
+    if len(decoded) == 34 and decoded[:2] == ED25519_MULTICODEC_PREFIX:
+        raw = decoded[2:]
+    elif len(decoded) == 32:
+        raw = decoded
+    else:
+        raise ValueError(
+            f"Invalid Ed25519 public key: expected 34 bytes (multicodec-prefixed) "
+            f"or 32 bytes (raw), got {len(decoded)}"
+        )
     return Ed25519PublicKey.from_public_bytes(raw)
 
 
