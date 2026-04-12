@@ -1,4 +1,4 @@
-"""ACP storage: key pin store (TOFU) and message idempotency store."""
+"""ARP storage: key pin store (TOFU) and message idempotency store."""
 
 from __future__ import annotations
 

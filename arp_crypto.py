@@ -1,4 +1,4 @@
-"""ACP cryptographic operations: Ed25519 key management, signing, verification, multibase encoding."""
+"""ARP cryptographic operations: Ed25519 key management, signing, verification, multibase encoding."""
 
 from __future__ import annotations
 
@@ -90,7 +90,7 @@ def public_key_from_multibase(multibase: str) -> Ed25519PublicKey:
 
 
 def sign_message(message: dict, private_key: Ed25519PrivateKey) -> dict:
-    """Sign an ACP message envelope.
+    """Sign an ARP message envelope.
 
     Takes a message dict WITHOUT a ``signature`` field, canonicalizes it,
     signs with the private key, and returns a new dict with the ``signature``
@@ -105,7 +105,7 @@ def sign_message(message: dict, private_key: Ed25519PrivateKey) -> dict:
 
 
 def verify_signature(message: dict, public_key: Ed25519PublicKey) -> bool:
-    """Verify the signature on an ACP message envelope.
+    """Verify the signature on an ARP message envelope.
 
     Returns True if valid, False otherwise.
     """

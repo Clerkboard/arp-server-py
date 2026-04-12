@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""JCS canonicalization test vectors from ACP spec Appendix D."""
+"""JCS canonicalization test vectors from ARP spec Appendix D."""
 
 import json
 import sys
 
-from acp_crypto import canonicalize
+from arp_crypto import canonicalize
 
 # ---------------------------------------------------------------------------
 # Vectors
@@ -15,14 +15,14 @@ VECTORS = [
         "name": "Vector 1 -- Key ordering",
         "input": {
             "type": "request",
-            "acp": "1.0",
+            "arp": "1.0",
             "to": "did:web:b.com:agent",
             "id": "msg_001",
             "from": "did:web:a.com:agent",
             "createdAt": "2026-04-12T00:00:00Z",
             "body": {"text": "hello"},
         },
-        "expected": '{"acp":"1.0","body":{"text":"hello"},"createdAt":"2026-04-12T00:00:00Z","from":"did:web:a.com:agent","id":"msg_001","to":"did:web:b.com:agent","type":"request"}',
+        "expected": '{"arp":"1.0","body":{"text":"hello"},"createdAt":"2026-04-12T00:00:00Z","from":"did:web:a.com:agent","id":"msg_001","to":"did:web:b.com:agent","type":"request"}',
     },
     {
         "name": "Vector 2 -- Numerics and nesting",

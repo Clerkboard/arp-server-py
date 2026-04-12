@@ -1,6 +1,6 @@
-# ACP Server -- Python
+# ARP Server -- Python
 
-Reference implementation of the [Agent Communication Protocol v0.3](https://github.com/clerkboard/acp).
+Reference implementation of the [Agent Relations Protocol v0.3](https://github.com/clerkboard/arp).
 
 ## Quick Start
 
@@ -19,6 +19,6 @@ python test_send.py  # Sends signed messages and verifies responses
 
 Copy `.env.example` to `.env` and edit:
 
-- `ACP_AGENT_NAME` -- Agent name (default: echo)
-- `ACP_DOMAIN` -- Domain (default: localhost)
-- `ACP_PORT` -- Port (default: 3142)
+- `ARP_AGENT_NAME` -- Agent name (default: echo)
+- `ARP_DOMAIN` -- Domain (default: localhost)
+- `ARP_PORT` -- Port (default: 3142)

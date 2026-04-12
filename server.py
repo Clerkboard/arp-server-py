@@ -1,4 +1,4 @@
-"""ACP Reference Server -- FastAPI implementation of the Agent Communication Protocol."""
+"""ARP Reference Server -- FastAPI implementation of the Agent Relations Protocol."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 
-from acp_crypto import (
+from arp_crypto import (
     KeyManager,
     canonicalize,
     multibase_decode,
@@ -26,7 +26,7 @@ from acp_crypto import (
     sign_message,
     verify_signature,
 )
-from acp_store import IdempotencyStore, PinStore
+from arp_store import IdempotencyStore, PinStore
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -34,10 +34,10 @@ from acp_store import IdempotencyStore, PinStore
 
 load_dotenv()
 
-AGENT_NAME = os.getenv("ACP_AGENT_NAME", "echo")
-DOMAIN = os.getenv("ACP_DOMAIN", "localhost")
-PORT = int(os.getenv("ACP_PORT", "3142"))
-DATA_DIR = os.getenv("ACP_DATA_DIR", "./data")
+AGENT_NAME = os.getenv("ARP_AGENT_NAME", "echo")
+DOMAIN = os.getenv("ARP_DOMAIN", "localhost")
+PORT = int(os.getenv("ARP_PORT", "3142"))
+DATA_DIR = os.getenv("ARP_DATA_DIR", "./data")
 
 MAX_BODY_SIZE = 1_048_576  # 1 MB
 
@@ -45,7 +45,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",
 )
-logger = logging.getLogger("acp.server")
+logger = logging.getLogger("arp.server")
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -88,7 +88,7 @@ def _build_response(
 ) -> dict:
     """Build and sign a response envelope."""
     msg: dict[str, Any] = {
-        "acp": "1.0",
+        "arp": "1.0",
         "id": _msg_id(),
         "type": msg_type,
         "from": _did(),
@@ -109,7 +109,7 @@ def _error_response(
     correlation_id: str | None = None,
     status_code: int = 400,
 ) -> Response:
-    """Build a signed ACP error response and wrap it in a FastAPI Response."""
+    """Build a signed ARP error response and wrap it in a FastAPI Response."""
     envelope = _build_response(
         msg_type="error",
         to_did=to_did,
@@ -119,12 +119,12 @@ def _error_response(
     return Response(
         content=json.dumps(envelope),
         status_code=status_code,
-        media_type="application/acp+json",
+        media_type="application/arp+json",
     )
 
 
 # ---------------------------------------------------------------------------
-# contentRef validation (ACP v0.3)
+# contentRef validation (ARP v0.3)
 # ---------------------------------------------------------------------------
 
 # Regex for private/reserved hostnames
@@ -239,7 +239,7 @@ async def lifespan(app: FastAPI):
     pin_store = PinStore(DATA_DIR)
     idempotency = IdempotencyStore()
 
-    logger.info("=== ACP Server Started ===")
+    logger.info("=== ARP Server Started ===")
     logger.info("  Agent : %s", AGENT_NAME)
     logger.info("  DID   : %s", _did())
     logger.info("  Inbox : %s/%s/inbox", _base_url(), AGENT_NAME)
@@ -255,7 +255,7 @@ async def lifespan(app: FastAPI):
         pass
 
 
-app = FastAPI(title="ACP Server", lifespan=lifespan)
+app = FastAPI(title="ARP Server", lifespan=lifespan)
 
 # ---------------------------------------------------------------------------
 # Routes: Discovery (static paths BEFORE parameterized paths)
@@ -265,20 +265,20 @@ app = FastAPI(title="ACP Server", lifespan=lifespan)
 @app.get("/agents.txt")
 async def agents_txt() -> Response:
     """Serve agents.txt discovery hint file (Section 5.3)."""
-    content = f"# ACP agents for this domain\nacp-version: 1.0\nacp-index: {_base_url()}/.well-known/acp/index.json\nacp-docs: https://github.com/clerkboard/acp/blob/main/spec/acp-rfc.md#appendix-e-implementers-quick-reference\n"
+    content = f"# ARP agents for this domain\narp-version: 1.0\narp-index: {_base_url()}/.well-known/arp/index.json\narp-docs: https://github.com/clerkboard/arp/blob/main/spec/arp-rfc.md#appendix-e-implementers-quick-reference\n"
     return Response(content=content, media_type="text/plain")
 
 
-@app.get("/.well-known/acp/index.json")
+@app.get("/.well-known/arp/index.json")
 async def agent_index() -> Response:
     """Serve the agent index for this domain."""
     index = {
         "domain": DOMAIN,
-        "protocol": "acp/1.0",
+        "protocol": "arp/1.0",
         "agents": [
             {
                 "name": AGENT_NAME,
-                "url": f"/.well-known/acp/{AGENT_NAME}.json",
+                "url": f"/.well-known/arp/{AGENT_NAME}.json",
                 "summary": "Echo agent for testing",
                 "tags": ["echo", "testing"],
             }
@@ -291,19 +291,19 @@ async def agent_index() -> Response:
     )
 
 
-@app.get("/.well-known/acp/{name}.json")
+@app.get("/.well-known/arp/{name}.json")
 async def agent_card(name: str) -> Response:
     """Serve the Agent Card for an agent."""
     if name != AGENT_NAME:
         return Response(status_code=404, content="Agent not found")
 
     card = {
-        "acp": "1.0",
+        "arp": "1.0",
         "name": AGENT_NAME,
         "did": _did(),
         "inbox": f"{_base_url()}/{AGENT_NAME}/inbox",
         "publicKey": keys.public_key_multibase,
-        "description": "Echo agent -- returns whatever you send it. For testing ACP message flow.",
+        "description": "Echo agent -- returns whatever you send it. For testing ARP message flow.",
         "capabilities": [
             {
                 "name": "echo",
@@ -350,8 +350,8 @@ async def did_document(name: str) -> Response:
         "assertionMethod": [f"{did}#key-1"],
         "service": [
             {
-                "id": "#acp",
-                "type": "AgentCommunicationProtocol",
+                "id": "#arp",
+                "type": "AgentRelationsProtocol",
                 "serviceEndpoint": f"{_base_url()}/{AGENT_NAME}/inbox",
             }
         ],
@@ -369,16 +369,16 @@ async def did_document(name: str) -> Response:
 
 @app.post("/{name}/inbox")
 async def inbox(name: str, request: Request) -> Response:
-    """Receive and process ACP messages."""
+    """Receive and process ARP messages."""
     if name != AGENT_NAME:
         return Response(status_code=404, content="Agent not found")
 
     # --- Content-Type check ---
     content_type = request.headers.get("content-type", "")
-    if "application/acp+json" not in content_type and "application/json" not in content_type:
+    if "application/arp+json" not in content_type and "application/json" not in content_type:
         return Response(
             status_code=415,
-            content=json.dumps({"error": "Content-Type must be application/acp+json or application/json"}),
+            content=json.dumps({"error": "Content-Type must be application/arp+json or application/json"}),
             media_type="application/json",
         )
 
@@ -404,7 +404,7 @@ async def inbox(name: str, request: Request) -> Response:
         )
 
     # --- Validate required envelope fields ---
-    required_fields = ["acp", "id", "type", "from", "to", "createdAt", "body", "signature"]
+    required_fields = ["arp", "id", "type", "from", "to", "createdAt", "body", "signature"]
     missing = [f for f in required_fields if f not in msg]
     if missing:
         sender_did = msg.get("from", "unknown")
@@ -537,7 +537,7 @@ async def inbox(name: str, request: Request) -> Response:
             status_code=401,
         )
 
-    # --- Validate contentRef objects in body (ACP v0.3) ---
+    # --- Validate contentRef objects in body (ARP v0.3) ---
     content_ref_err = validate_content_refs(msg.get("body", {}))
     if content_ref_err:
         return _error_response(
@@ -611,7 +611,7 @@ async def inbox(name: str, request: Request) -> Response:
     return Response(
         content=json.dumps(response_envelope, indent=2),
         status_code=200,
-        media_type="application/acp+json",
+        media_type="application/arp+json",
     )
 
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ACP test client -- sends signed messages to a local ACP server and verifies responses."""
+"""ARP test client -- sends signed messages to a local ARP server and verifies responses."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Tuple
 
 # We reuse crypto helpers from the project -- run from the project root.
-from acp_crypto import (
+from arp_crypto import (
     generate_keypair,
     public_key_to_multibase,
     sign_message,
@@ -53,13 +53,13 @@ def expires_iso() -> str:
 
 
 def send(envelope: dict) -> Tuple[int, dict]:
-    """Send a signed ACP envelope to the server and return (status_code, response_body)."""
+    """Send a signed ARP envelope to the server and return (status_code, response_body)."""
     data = json.dumps(envelope).encode("utf-8")
     req = urllib.request.Request(
         INBOX_URL,
         data=data,
         headers={
-            "Content-Type": "application/acp+json",
+            "Content-Type": "application/arp+json",
         },
         method="POST",
     )
@@ -105,14 +105,14 @@ def test_discovery() -> None:
     )
 
     # Agent card
-    req = urllib.request.Request(f"{SERVER}/.well-known/acp/{AGENT_NAME}.json")
+    req = urllib.request.Request(f"{SERVER}/.well-known/arp/{AGENT_NAME}.json")
     with urllib.request.urlopen(req) as resp:
         card = json.loads(resp.read())
     check("Agent card name", card.get("name") == AGENT_NAME)
     check("Agent card has publicKey", card.get("publicKey", "").startswith("z"))
 
     # Index
-    req = urllib.request.Request(f"{SERVER}/.well-known/acp/index.json")
+    req = urllib.request.Request(f"{SERVER}/.well-known/arp/index.json")
     with urllib.request.urlopen(req) as resp:
         index = json.loads(resp.read())
     check("Agent index lists agent", len(index.get("agents", [])) == 1)
@@ -123,7 +123,7 @@ def test_first_contact(private_key, pub_multibase: str, server_pub_multibase: st
     print("\n--- First Contact (negotiate) ---")
 
     envelope = {
-        "acp": "1.0",
+        "arp": "1.0",
         "id": msg_id(),
         "type": "negotiate",
         "from": SENDER_DID,
@@ -153,13 +153,13 @@ def test_echo(private_key, server_pub_multibase: str) -> None:
     print("\n--- Echo Request ---")
 
     echo_body = {
-        "greeting": "Hello, ACP!",
+        "greeting": "Hello, ARP!",
         "numbers": [1, 2, 3],
         "nested": {"key": "value"},
     }
 
     envelope = {
-        "acp": "1.0",
+        "arp": "1.0",
         "id": msg_id(),
         "type": "request",
         "from": SENDER_DID,
@@ -187,7 +187,7 @@ def test_unknown_capability(private_key) -> None:
     print("\n--- Unknown Capability ---")
 
     envelope = {
-        "acp": "1.0",
+        "arp": "1.0",
         "id": msg_id(),
         "type": "request",
         "from": SENDER_DID,
@@ -215,7 +215,7 @@ def test_duplicate_rejection(private_key) -> None:
 
     fixed_id = msg_id()
     envelope = {
-        "acp": "1.0",
+        "arp": "1.0",
         "id": fixed_id,
         "type": "request",
         "from": SENDER_DID,
@@ -245,7 +245,7 @@ def test_first_contact_required() -> None:
     pub_mb = public_key_to_multibase(stranger_pub)
 
     envelope = {
-        "acp": "1.0",
+        "arp": "1.0",
         "id": msg_id(),
         "type": "request",
         "from": stranger_did,
@@ -274,7 +274,7 @@ def test_first_contact_required() -> None:
 def main() -> None:
     global passed, failed
 
-    print("ACP Test Client")
+    print("ARP Test Client")
     print(f"Target: {INBOX_URL}")
     print()
 
@@ -285,7 +285,7 @@ def main() -> None:
     print(f"Sender PubKey: {pub_multibase}")
 
     # Fetch server's public key from agent card
-    req = urllib.request.Request(f"{SERVER}/.well-known/acp/{AGENT_NAME}.json")
+    req = urllib.request.Request(f"{SERVER}/.well-known/arp/{AGENT_NAME}.json")
     with urllib.request.urlopen(req) as resp:
         card = json.loads(resp.read())
     server_pub_multibase = card["publicKey"]
