@@ -262,6 +262,13 @@ app = FastAPI(title="ACP Server", lifespan=lifespan)
 # ---------------------------------------------------------------------------
 
 
+@app.get("/agents.txt")
+async def agents_txt() -> Response:
+    """Serve agents.txt discovery hint file (Section 5.3)."""
+    content = f"# ACP agents for this domain\nacp-index: {_base_url()}/.well-known/acp/index.json\n"
+    return Response(content=content, media_type="text/plain")
+
+
 @app.get("/.well-known/acp/index.json")
 async def agent_index() -> Response:
     """Serve the agent index for this domain."""
@@ -273,6 +280,7 @@ async def agent_index() -> Response:
                 "name": AGENT_NAME,
                 "url": f"/.well-known/acp/{AGENT_NAME}.json",
                 "summary": "Echo agent for testing",
+                "tags": ["echo", "testing"],
             }
         ],
         "pagination": {"hasMore": False, "total": 1},
@@ -493,6 +501,7 @@ async def inbox(name: str, request: Request) -> Response:
                 message="First interaction must be a negotiate message with firstContact: true",
                 retryable=True,
                 correlation_id=correlation_id,
+                status_code=403,
             )
 
         # Accept publicKey from body
@@ -564,7 +573,7 @@ async def inbox(name: str, request: Request) -> Response:
             response_envelope = _build_response(
                 msg_type="response",
                 to_did=sender_did,
-                body=msg["body"],
+                body={"echo": msg["body"], "receivedAt": _now_iso()},
                 correlation_id=correlation_id,
             )
             logger.info("Echoed request from %s", sender_did)

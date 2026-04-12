@@ -174,7 +174,7 @@ def test_echo(private_key, server_pub_multibase: str) -> None:
     status, resp = send(signed)
     check("Status 200", status == 200, f"got {status}")
     check("Type is response", resp.get("type") == "response", f"got {resp.get('type')}")
-    check("Body echoed back", resp.get("body") == echo_body, f"got {resp.get('body')}")
+    check("Body echoed back", resp.get("body", {}).get("echo") == echo_body, f"got {resp.get('body')}")
 
     # Verify server signature
     server_pub = public_key_from_multibase(server_pub_multibase)
@@ -258,7 +258,7 @@ def test_first_contact_required() -> None:
     signed = sign_message(envelope, stranger_key)
 
     status, resp = send(signed)
-    check("Status 400", status == 400, f"got {status}")
+    check("Status 403", status == 403, f"got {status}")
     check(
         "Error code FIRST_CONTACT_REQUIRED",
         resp.get("body", {}).get("code") == "FIRST_CONTACT_REQUIRED",
