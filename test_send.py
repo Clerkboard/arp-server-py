@@ -140,7 +140,9 @@ def test_first_contact(private_key, pub_multibase: str, server_pub_multibase: st
     status, resp = send(signed)
     check("Status 200", status == 200, f"got {status}")
     check("Type is acknowledge", resp.get("type") == "acknowledge", f"got {resp.get('type')}")
-    check("Body accepted", resp.get("body", {}).get("accepted") is True)
+    check("Body firstContact", resp.get("body", {}).get("firstContact") is True)
+    check("Body has approvedCapabilities", isinstance(resp.get("body", {}).get("approvedCapabilities"), list))
+    check("Body has trustLevel", resp.get("body", {}).get("trustLevel") in ("trusted", "known", "new", "unknown"))
 
     # Verify server's signature on the response
     server_pub = public_key_from_multibase(server_pub_multibase)
@@ -236,9 +238,37 @@ def test_duplicate_rejection(private_key) -> None:
     check("Duplicate rejected with 409", status2 == 409, f"got {status2}")
 
 
+def test_open_capability() -> None:
+    """Send an echo request from an unknown DID -- should succeed because echo is open."""
+    print("\n--- Open Capability (echo from unknown sender) ---")
+
+    stranger_key, stranger_pub = generate_keypair()
+    stranger_did = "did:web:localhost:open-tester"
+    pub_mb = public_key_to_multibase(stranger_pub)
+
+    envelope = {
+        "arp": "1.0",
+        "id": msg_id(),
+        "type": "request",
+        "from": stranger_did,
+        "to": AGENT_DID,
+        "capability": "echo",
+        "createdAt": now_iso(),
+        "expiresAt": expires_iso(),
+        "body": {"publicKey": pub_mb, "test": "open capability"},
+    }
+    signed = sign_message(envelope, stranger_key)
+
+    status, resp = send(signed)
+    check("Status 200", status == 200, f"got {status}")
+    check("Type is response", resp.get("type") == "response", f"got {resp.get('type')}")
+    check("Body has openRequest true", resp.get("body", {}).get("openRequest") is True)
+    check("Body has trustLevel", resp.get("body", {}).get("trustLevel") in ("trusted", "known", "new", "unknown"))
+
+
 def test_first_contact_required() -> None:
-    """Send a request from an unknown DID without negotiating first."""
-    print("\n--- First Contact Required ---")
+    """Send a private-echo request from an unknown DID without negotiating first."""
+    print("\n--- First Contact Required (private-echo) ---")
 
     stranger_key, stranger_pub = generate_keypair()
     stranger_did = "did:web:localhost:stranger"
@@ -250,7 +280,7 @@ def test_first_contact_required() -> None:
         "type": "request",
         "from": stranger_did,
         "to": AGENT_DID,
-        "capability": "echo",
+        "capability": "private-echo",
         "createdAt": now_iso(),
         "expiresAt": expires_iso(),
         "body": {"publicKey": pub_mb, "test": "should fail"},
@@ -297,6 +327,7 @@ def main() -> None:
     test_echo(private_key, server_pub_multibase)
     test_unknown_capability(private_key)
     test_duplicate_rejection(private_key)
+    test_open_capability()
     test_first_contact_required()
 
     # Summary

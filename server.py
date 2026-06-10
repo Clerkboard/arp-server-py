@@ -1,4 +1,13 @@
-"""ARP Reference Server -- FastAPI implementation of the Agent Relations Protocol."""
+"""ARP Reference Server -- FastAPI implementation of the Agent Relations Protocol (v0.4.0).
+
+Routes:
+
+  GET  /{name}/did.json              -- DID document
+  GET  /.well-known/arp/{name}.json  -- Agent Card
+  GET  /.well-known/arp/index.json   -- Agent directory
+  GET  /agents.txt                   -- Discovery hint file
+  POST /{name}/inbox                 -- Message inbox
+"""
 
 from __future__ import annotations
 
@@ -26,7 +35,7 @@ from arp_crypto import (
     sign_message,
     verify_signature,
 )
-from arp_store import IdempotencyStore, PinStore
+from arp_store import IdempotencyStore, RelationStore
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -46,6 +55,9 @@ logging.basicConfig(
     format="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",
 )
 logger = logging.getLogger("arp.server")
+
+# Open capabilities -- accept requests without a first-contact handshake
+OPEN_CAPABILITIES: set[str] = {"echo"}
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -219,7 +231,7 @@ def validate_content_refs(body: Any) -> Optional[str]:
 # ---------------------------------------------------------------------------
 
 keys: KeyManager
-pin_store: PinStore
+relation_store: RelationStore
 idempotency: IdempotencyStore
 
 
@@ -232,19 +244,19 @@ async def _idempotency_cleanup_loop() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global keys, pin_store, idempotency
+    global keys, relation_store, idempotency
 
     os.makedirs(DATA_DIR, exist_ok=True)
     keys = KeyManager(DATA_DIR)
-    pin_store = PinStore(DATA_DIR)
+    relation_store = RelationStore(DATA_DIR)
     idempotency = IdempotencyStore()
 
-    logger.info("=== ARP Server Started ===")
+    logger.info("=== ARP Server Started (v0.4.0) ===")
     logger.info("  Agent : %s", AGENT_NAME)
     logger.info("  DID   : %s", _did())
     logger.info("  Inbox : %s/%s/inbox", _base_url(), AGENT_NAME)
     logger.info("  PubKey: %s", keys.public_key_multibase)
-    logger.info("==========================")
+    logger.info("====================================")
 
     cleanup_task = asyncio.create_task(_idempotency_cleanup_loop())
     yield
@@ -264,15 +276,34 @@ app = FastAPI(title="ARP Server", lifespan=lifespan)
 
 @app.get("/agents.txt")
 async def agents_txt() -> Response:
-    """Serve agents.txt discovery hint file (Section 5.3)."""
-    content = f"# ARP agents for this domain\narp-version: 1.0\narp-index: {_base_url()}/.well-known/arp/index.json\narp-docs: https://github.com/clerkboard/arp/blob/main/spec/arp-rfc.md#appendix-e-implementers-quick-reference\n"
+    """Serve agents.txt discovery hint file (Section 5.3).
+
+    v0.4.0: renamed arp-index -> arp-directory, added open-capabilities
+    and crawl-delay.
+    """
+    open_caps = ", ".join(sorted(OPEN_CAPABILITIES))
+    content = (
+        "# ARP agents for this domain\n"
+        f"arp-directory: {_base_url()}/.well-known/arp/index.json\n"
+        "arp-version: 1.0\n"
+        f"open-capabilities: {open_caps}\n"
+        "crawl-delay: 10\n"
+    )
     return Response(content=content, media_type="text/plain")
 
 
 @app.get("/.well-known/arp/index.json")
 async def agent_index() -> Response:
-    """Serve the agent index for this domain."""
+    """Serve the agent directory for this domain.
+
+    v0.4.0: added @context and @type: CollectionPage.
+    """
     index = {
+        "@context": {
+            "@vocab": "https://schema.org/",
+            "arp": "https://agentrelationsprotocol.com/ns/",
+        },
+        "@type": "CollectionPage",
         "domain": DOMAIN,
         "protocol": "arp/1.0",
         "agents": [
@@ -293,11 +324,20 @@ async def agent_index() -> Response:
 
 @app.get("/.well-known/arp/{name}.json")
 async def agent_card(name: str) -> Response:
-    """Serve the Agent Card for an agent."""
+    """Serve the Agent Card for an agent.
+
+    v0.4.0: added @context, @type: SoftwareApplication, open flag on
+    echo capability, and private-echo capability.
+    """
     if name != AGENT_NAME:
         return Response(status_code=404, content="Agent not found")
 
     card = {
+        "@context": {
+            "@vocab": "https://schema.org/",
+            "arp": "https://agentrelationsprotocol.com/ns/",
+        },
+        "@type": "SoftwareApplication",
         "arp": "1.0",
         "name": AGENT_NAME,
         "did": _did(),
@@ -310,7 +350,14 @@ async def agent_card(name: str) -> Response:
                 "description": "Echoes back the message body. Useful for testing signing, verification, and message flow.",
                 "schema": {"type": "object"},
                 "responseSchema": {"type": "object"},
-            }
+                "open": True,
+            },
+            {
+                "name": "private-echo",
+                "description": "Same as echo but requires a relation. For testing first-contact enforcement.",
+                "schema": {"type": "object"},
+                "responseSchema": {"type": "object"},
+            },
         ],
         "auth": {
             "required": True,
@@ -321,6 +368,30 @@ async def agent_card(name: str) -> Response:
         },
         "rateLimit": {"requests": 100, "window": "60s"},
         "contact": f"admin@{DOMAIN}",
+        # v0.7 -- Notifications (Section 21.6)
+        "notifications": {
+            "supported": True,
+            "events": {
+                "order.shipped": 'Fires when a demo order is "shipped"',
+                "order.delivered": 'Fires when a demo order is "delivered"',
+            },
+            "defaultLease": 604800,  # 7 days
+            "maxLease": 7776000,  # 90 days
+        },
+        # v0.7 -- Settlements (Section 22.3)
+        "settlements": {
+            "supported": True,
+            "rails": [
+                {
+                    "name": "x402-base-usdc",
+                    "spec": "https://x402.org/spec/1.0",
+                    "currencies": ["USDC"],
+                },
+            ],
+            "primitives": ["prepay", "postpay"],
+            "settlementWindow": "PT24H",
+            "quoteCapability": "arp:settlement.quote",
+        },
     }
     return Response(
         content=json.dumps(card, indent=2),
@@ -369,7 +440,7 @@ async def did_document(name: str) -> Response:
 
 @app.post("/{name}/inbox")
 async def inbox(name: str, request: Request) -> Response:
-    """Receive and process ARP messages."""
+    """Receive and process ARP messages (v0.4.0)."""
     if name != AGENT_NAME:
         return Response(status_code=404, content="Agent not found")
 
@@ -462,14 +533,15 @@ async def inbox(name: str, request: Request) -> Response:
             status_code=409,
         )
 
-    # --- Resolve sender's public key ---
+    # --- Resolve sender's public key & check relation state (v0.4.0) ---
     sender_pub_key = None
-    is_first_contact = not pin_store.has_pin(sender_did)
+    existing_relation = relation_store.get_relation(sender_did)
+    has_active_relation = relation_store.has_active_relation(sender_did)
+    is_open_capability = msg_type == "request" and msg.get("capability", "") in OPEN_CAPABILITIES
 
-    if not is_first_contact:
-        # Use pinned key
-        pin = pin_store.get_pin(sender_did)
-        pinned_multibase = pin["public_key_multibase"]
+    if existing_relation and existing_relation["status"] != "terminated":
+        # Known sender -- use pinned key from relation
+        pinned_multibase = existing_relation["pinnedKey"]
 
         # If sender provides a publicKey in body, check it matches pin
         body_key = msg.get("body", {}).get("publicKey")
@@ -492,29 +564,10 @@ async def inbox(name: str, request: Request) -> Response:
                 retryable=False,
                 correlation_id=correlation_id,
             )
-    else:
-        # First contact -- require negotiate type
-        if msg_type != "negotiate":
-            return _error_response(
-                to_did=sender_did,
-                code="FIRST_CONTACT_REQUIRED",
-                message="First interaction must be a negotiate message with firstContact: true",
-                retryable=True,
-                correlation_id=correlation_id,
-                status_code=403,
-            )
 
-        # Accept publicKey from body
-        body_key = msg.get("body", {}).get("publicKey")
-        if not body_key:
-            return _error_response(
-                to_did=sender_did,
-                code="AUTH_FAILED",
-                message="First-contact negotiate must include body.publicKey",
-                retryable=False,
-                correlation_id=correlation_id,
-            )
-
+    elif msg_type == "negotiate" and isinstance(msg.get("body", {}).get("publicKey"), str):
+        # First contact -- accept key from negotiate body
+        body_key = msg["body"]["publicKey"]
         try:
             sender_pub_key = public_key_from_multibase(body_key)
         except Exception:
@@ -525,6 +578,70 @@ async def inbox(name: str, request: Request) -> Response:
                 retryable=False,
                 correlation_id=correlation_id,
             )
+
+    elif is_open_capability and not has_active_relation:
+        # Open capability from unknown sender -- require publicKey in body
+        body_key = msg.get("body", {}).get("publicKey")
+        if isinstance(body_key, str):
+            try:
+                sender_pub_key = public_key_from_multibase(body_key)
+            except Exception:
+                return _error_response(
+                    to_did=sender_did,
+                    code="AUTH_FAILED",
+                    message="Invalid publicKey format",
+                    retryable=False,
+                    correlation_id=correlation_id,
+                )
+        else:
+            return _error_response(
+                to_did=sender_did,
+                code="AUTH_FAILED",
+                message="Open capability requests from unknown senders must include publicKey in body",
+                retryable=False,
+                correlation_id=correlation_id,
+            )
+
+    elif existing_relation and existing_relation["status"] == "terminated":
+        # Terminated relation -- reject all messages
+        return _error_response(
+            to_did=sender_did,
+            code="AUTH_DENIED",
+            message="Relation has been terminated",
+            retryable=False,
+            correlation_id=correlation_id,
+            status_code=403,
+        )
+
+    elif msg_type == "request" and not is_open_capability:
+        # Non-open capability, no relation -- require first contact
+        return _error_response(
+            to_did=sender_did,
+            code="FIRST_CONTACT_REQUIRED",
+            message="Send a negotiate message with firstContact: true before making requests",
+            retryable=True,
+            correlation_id=correlation_id,
+            status_code=403,
+        )
+
+    elif msg_type != "negotiate":
+        return _error_response(
+            to_did=sender_did,
+            code="FIRST_CONTACT_REQUIRED",
+            message="Send a negotiate message with firstContact: true before making requests",
+            retryable=True,
+            correlation_id=correlation_id,
+            status_code=403,
+        )
+
+    if sender_pub_key is None:
+        return _error_response(
+            to_did=sender_did,
+            code="AUTH_FAILED",
+            message="Unable to resolve sender public key",
+            retryable=False,
+            correlation_id=correlation_id,
+        )
 
     # --- Verify signature ---
     if not verify_signature(msg, sender_pub_key):
@@ -537,6 +654,20 @@ async def inbox(name: str, request: Request) -> Response:
             status_code=401,
         )
 
+    # --- Relation management: TOFU + lifecycle (v0.4.0) ---
+    if existing_relation and existing_relation["status"] != "terminated":
+        sender_multibase = existing_relation["pinnedKey"]
+        # Touch the relation (reactivates dormant)
+        relation_store.touch_relation(sender_did)
+    elif msg_type == "negotiate":
+        # First contact -- create relation
+        body_key = msg.get("body", {}).get("publicKey", "")
+        relation_store.create_relation(sender_did, body_key)
+    # Open capability from unknown sender: no relation created (spec: step 4)
+
+    # --- Record message ID (only after signature verified) ---
+    idempotency.add_message(msg_id)
+
     # --- Validate contentRef objects in body (ARP v0.3) ---
     content_ref_err = validate_content_refs(msg.get("body", {}))
     if content_ref_err:
@@ -548,35 +679,93 @@ async def inbox(name: str, request: Request) -> Response:
             correlation_id=correlation_id,
         )
 
-    # --- Pin key on first contact ---
-    if is_first_contact:
-        body_key = msg.get("body", {}).get("publicKey")
-        pin_store.set_pin(sender_did, body_key)
-        logger.info("First contact from %s -- key pinned", sender_did)
-
-    # --- Record message ID ---
-    idempotency.add_message(msg_id)
-
     # --- Process by message type ---
-    if msg_type == "negotiate":
-        response_envelope = _build_response(
-            msg_type="acknowledge",
-            to_did=sender_did,
-            body={"accepted": True, "message": "First contact acknowledged, key pinned"},
-            correlation_id=correlation_id,
+    logger.info("Processing message: id=%s type=%s from=%s", msg_id, msg_type, sender_did)
+
+    # v0.7 -- Notifications (Section 21): fire-and-forget, 202 Accepted, no body
+    if msg_type == "notify":
+        event = msg.get("event") or ""
+        notification_id = msg.get("notificationId") or ""
+        if not event or not notification_id:
+            return _error_response(
+                to_did=sender_did,
+                code="SCHEMA_INVALID",
+                message="notify messages MUST include event and notificationId",
+                retryable=False,
+                correlation_id=correlation_id,
+            )
+        logger.info(
+            "Notification received: from=%s event=%s notificationId=%s",
+            sender_did, event, notification_id,
         )
-        logger.info("Acknowledged negotiate from %s", sender_did)
+        # Reference server logs and acks; real applications dispatch to handlers.
+        return Response(status_code=202)
+
+    if msg_type == "negotiate":
+        # Check for termination request (v0.4.0 Section 11.3)
+        if msg.get("body", {}).get("terminate") is True:
+            relation_store.terminate_relation(sender_did)
+            response_envelope = _build_response(
+                msg_type="acknowledge",
+                to_did=sender_did,
+                body={
+                    "terminated": True,
+                    "message": "Relation terminated.",
+                },
+                correlation_id=correlation_id,
+            )
+        else:
+            trust_level = relation_store.get_trust_level(sender_did)
+            approved_until = (
+                datetime.now(timezone.utc) + timedelta(days=30)
+            ).strftime("%Y-%m-%dT%H:%M:%SZ")
+            response_envelope = _build_response(
+                msg_type="acknowledge",
+                to_did=sender_did,
+                body={
+                    "firstContact": True,
+                    "approvedCapabilities": ["echo", "private-echo"],
+                    "approvedUntil": approved_until,
+                    "trustLevel": trust_level,
+                    "message": "First contact acknowledged. Relation created.",
+                },
+                correlation_id=correlation_id,
+            )
+        logger.info("Processed negotiate from %s", sender_did)
 
     elif msg_type == "request":
         capability = msg.get("capability")
+        trust_level = relation_store.get_trust_level(sender_did)
+
         if capability == "echo":
             response_envelope = _build_response(
                 msg_type="response",
                 to_did=sender_did,
-                body={"echo": msg["body"], "receivedAt": _now_iso()},
+                body={
+                    "echo": msg["body"],
+                    "receivedAt": _now_iso(),
+                    "trustLevel": trust_level,
+                    "openRequest": is_open_capability and not has_active_relation,
+                },
                 correlation_id=correlation_id,
             )
             logger.info("Echoed request from %s", sender_did)
+
+        elif capability == "private-echo":
+            # private-echo is NOT open -- if we got here the relation check passed
+            response_envelope = _build_response(
+                msg_type="response",
+                to_did=sender_did,
+                body={
+                    "echo": msg["body"],
+                    "receivedAt": _now_iso(),
+                    "trustLevel": trust_level,
+                    "openRequest": False,
+                },
+                correlation_id=correlation_id,
+            )
+            logger.info("Private-echoed request from %s", sender_did)
+
         else:
             response_envelope = _build_response(
                 msg_type="error",
